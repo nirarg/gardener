@@ -232,7 +232,7 @@ metadata:
   name: gardener-seed-admission-controller
   namespace: shoot--foo--bar
 `
-		validatingWebhookConfigurationYAML = `apiVersion: admissionregistration.k8s.io/v1beta1
+		validatingWebhookConfigurationYAML = `apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingWebhookConfiguration
 metadata:
   creationTimestamp: null
@@ -266,6 +266,7 @@ webhooks:
     - DELETE
     resources:
     - customresourcedefinitions
+  sideEffects: None
   timeoutSeconds: 10
 - admissionReviewVersions:
   - v1beta1
@@ -298,6 +299,7 @@ webhooks:
     - networks
     - operatingsystemconfigs
     - workers
+  sideEffects: None
   timeoutSeconds: 10
 `
 		vpaYAML = `apiVersion: autoscaling.k8s.io/v1beta2

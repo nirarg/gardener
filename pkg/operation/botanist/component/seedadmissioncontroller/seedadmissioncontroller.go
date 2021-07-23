@@ -21,7 +21,7 @@ import (
 
 	admissionv1 "k8s.io/api/admission/v1"
 	admissionv1beta1 "k8s.io/api/admission/v1beta1"
-	admissionregistrationv1beta1 "k8s.io/api/admissionregistration/v1beta1"
+	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	appsv1 "k8s.io/api/apps/v1"
 	autoscalingv1 "k8s.io/api/autoscaling/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -283,9 +283,9 @@ func (g *gardenerSeedAdmissionController) Deploy(ctx context.Context) error {
 			},
 		}
 
-		webhookClientConfig = admissionregistrationv1beta1.WebhookClientConfig{
+		webhookClientConfig = admissionregistrationv1.WebhookClientConfig{
 			CABundle: []byte(TLSCACert),
-			Service: &admissionregistrationv1beta1.ServiceReference{
+			Service: &admissionregistrationv1.ServiceReference{
 				Name:      service.Name,
 				Namespace: service.Namespace,
 				Path:      pointer.String(extensioncrds.WebhookPath),
@@ -318,23 +318,27 @@ func (g *gardenerSeedAdmissionController) Destroy(ctx context.Context) error {
 
 // GetValidatingWebhookConfig returns the ValidatingWebhookConfiguration for the seedadmissioncontroller component for
 // reuse between the component and integration tests.
-func GetValidatingWebhookConfig(clientConfig admissionregistrationv1beta1.WebhookClientConfig) *admissionregistrationv1beta1.ValidatingWebhookConfiguration {
-	failurePolicy := admissionregistrationv1beta1.Fail
+func GetValidatingWebhookConfig(clientConfig admissionregistrationv1.WebhookClientConfig) *admissionregistrationv1.ValidatingWebhookConfiguration {
+	var (
+		failurePolicy = admissionregistrationv1.Fail
+		matchPolicy   = admissionregistrationv1.Exact
+		sideEffect    = admissionregistrationv1.SideEffectClassNone
+	)
 
-	return &admissionregistrationv1beta1.ValidatingWebhookConfiguration{
+	return &admissionregistrationv1.ValidatingWebhookConfiguration{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:   Name,
 			Labels: getLabels(),
 		},
-		Webhooks: []admissionregistrationv1beta1.ValidatingWebhook{{
+		Webhooks: []admissionregistrationv1.ValidatingWebhook{{
 			Name: "crds.seed.admission.core.gardener.cloud",
-			Rules: []admissionregistrationv1beta1.RuleWithOperations{{
-				Rule: admissionregistrationv1beta1.Rule{
+			Rules: []admissionregistrationv1.RuleWithOperations{{
+				Rule: admissionregistrationv1.Rule{
 					APIGroups:   []string{apiextensionsv1.GroupName},
 					APIVersions: []string{apiextensionsv1beta1.SchemeGroupVersion.Version, apiextensionsv1.SchemeGroupVersion.Version},
 					Resources:   []string{"customresourcedefinitions"},
 				},
-				Operations: []admissionregistrationv1beta1.OperationType{admissionregistrationv1beta1.Delete},
+				Operations: []admissionregistrationv1.OperationType{admissionregistrationv1.Delete},
 			}},
 			FailurePolicy:     &failurePolicy,
 			NamespaceSelector: &metav1.LabelSelector{},
@@ -343,11 +347,12 @@ func GetValidatingWebhookConfig(clientConfig admissionregistrationv1beta1.Webhoo
 			},
 			ClientConfig:            clientConfig,
 			AdmissionReviewVersions: []string{admissionv1beta1.SchemeGroupVersion.Version, admissionv1.SchemeGroupVersion.Version},
+			SideEffects:             &sideEffect,
 			TimeoutSeconds:          pointer.Int32(10),
 		}, {
 			Name: "crs.seed.admission.core.gardener.cloud",
-			Rules: []admissionregistrationv1beta1.RuleWithOperations{{
-				Rule: admissionregistrationv1beta1.Rule{
+			Rules: []admissionregistrationv1.RuleWithOperations{{
+				Rule: admissionregistrationv1.Rule{
 					APIGroups:   []string{extensionsv1alpha1.SchemeGroupVersion.Group},
 					APIVersions: []string{extensionsv1alpha1.SchemeGroupVersion.Version},
 					Resources: []string{
@@ -364,12 +369,14 @@ func GetValidatingWebhookConfig(clientConfig admissionregistrationv1beta1.Webhoo
 						"workers",
 					},
 				},
-				Operations: []admissionregistrationv1beta1.OperationType{admissionregistrationv1beta1.Delete},
+				Operations: []admissionregistrationv1.OperationType{admissionregistrationv1.Delete},
 			}},
 			FailurePolicy:           &failurePolicy,
 			NamespaceSelector:       &metav1.LabelSelector{},
 			ClientConfig:            clientConfig,
 			AdmissionReviewVersions: []string{admissionv1beta1.SchemeGroupVersion.Version, admissionv1.SchemeGroupVersion.Version},
+			MatchPolicy:             &matchPolicy,
+			SideEffects:             &sideEffect,
 			TimeoutSeconds:          pointer.Int32(10),
 		}},
 	}
