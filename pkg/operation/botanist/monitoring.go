@@ -36,7 +36,6 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
-	extensionsv1beta1 "k8s.io/api/extensions/v1beta1"
 	networkingv1 "k8s.io/api/networking/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -521,7 +520,7 @@ func (b *Botanist) DeleteSeedMonitoring(ctx context.Context) error {
 				Name:      "prometheus-basic-auth",
 			},
 		},
-		&extensionsv1beta1.Ingress{
+		&networkingv1.Ingress{
 			ObjectMeta: metav1.ObjectMeta{
 				Namespace: b.Shoot.SeedNamespace,
 				Name:      "prometheus",

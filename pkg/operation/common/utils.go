@@ -32,7 +32,6 @@ import (
 	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
-	extensionsv1beta1 "k8s.io/api/extensions/v1beta1"
 	networkingv1 "k8s.io/api/networking/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	schedulingv1 "k8s.io/api/scheduling/v1"
@@ -230,7 +229,7 @@ func DeleteLoki(ctx context.Context, k8sClient client.Client, namespace string) 
 // DeleteShootNodeLoggingStack deletes all shoot resource of the shoot-node logging stack in the given namespace.
 func DeleteShootNodeLoggingStack(ctx context.Context, k8sClient client.Client, namespace string) error {
 	resources := []client.Object{
-		&extensionsv1beta1.Ingress{ObjectMeta: metav1.ObjectMeta{Name: "loki", Namespace: namespace}},
+		&networkingv1.Ingress{ObjectMeta: metav1.ObjectMeta{Name: "loki", Namespace: namespace}},
 		&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: logging.SecretNameLokiKubeRBACProxyKubeconfig, Namespace: namespace}},
 		&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: LokiTLS, Namespace: namespace}},
 		&networkingv1.NetworkPolicy{ObjectMeta: metav1.ObjectMeta{Name: "allow-from-prometheus-to-loki-telegraf", Namespace: namespace}},
@@ -294,7 +293,7 @@ func DeleteAlertmanager(ctx context.Context, k8sClient client.Client, namespace 
 				Namespace: namespace,
 			},
 		},
-		&extensionsv1beta1.Ingress{
+		&networkingv1.Ingress{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "alertmanager",
 				Namespace: namespace,
