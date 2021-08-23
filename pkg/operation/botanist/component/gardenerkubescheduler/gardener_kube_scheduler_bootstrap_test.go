@@ -203,6 +203,26 @@ var _ = Describe("Bootstrap", func() {
 					Expect(config).To(Equal(expectedV20Config))
 				})
 			})
+			Context("v1.21", func() {
+				BeforeEach(func() {
+					version, err = semver.NewVersion("1.21.3")
+					Expect(err).ToNot(HaveOccurred())
+				})
+
+				It("has correct config", func() {
+					Expect(config).To(Equal(expectedV21Config))
+				})
+			})
+			Context("v1.22", func() {
+				BeforeEach(func() {
+					version, err = semver.NewVersion("1.22.1")
+					Expect(err).ToNot(HaveOccurred())
+				})
+
+				It("has correct config", func() {
+					Expect(config).To(Equal(expectedV22Config))
+				})
+			})
 		})
 	})
 })
@@ -265,4 +285,8 @@ profiles:
   schedulerName: gardener-shoot-controlplane-scheduler
 `
 	expectedV20Config = expectedV19Config
+
+	expectedV21Config = expectedV19Config
+
+	expectedV22Config = expectedV19Config
 )
