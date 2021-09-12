@@ -15,9 +15,11 @@
 package seed
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	gardencorev1beta1 "github.com/gardener/gardener/pkg/apis/core/v1beta1"
@@ -39,12 +41,17 @@ import (
 	apiequality "k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/record"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+
+	hyperapi "github.com/openshift/hypershift/api"
+	hypershiftassets "github.com/openshift/hypershift/cmd/install/assets"
+	crclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 func (c *Controller) seedAdd(obj interface{}) {
@@ -118,7 +125,8 @@ func (r *reconciler) Reconcile(ctx context.Context, request reconcile.Request) (
 	}
 
 	seed := &gardencorev1beta1.Seed{}
-	if err := gardenClient.Client().Get(ctx, request.NamespacedName, seed); err != nil {
+	gClient := gardenClient.Client()
+	if err := gClient.Get(ctx, request.NamespacedName, seed); err != nil {
 		if apierrors.IsNotFound(err) {
 			log.Debugf("[SEED RECONCILE] skipping because Seed has been deleted")
 
@@ -132,12 +140,117 @@ func (r *reconciler) Reconcile(ctx context.Context, request reconcile.Request) (
 		return reconcile.Result{}, err
 	}
 
-	if err := r.reconcile(ctx, gardenClient.Client(), seed, log); err != nil {
+	opts := Options{
+		Namespace:       "hypershift",
+		HyperShiftImage: "registry.ci.openshift.org/hypershift/hypershift:latest",
+	}
+	var objects []crclient.Object
+	objects = append(objects, hyperShiftOperatorManifests(opts)...)
+	if err := apply(ctx, gClient, objects); err != nil {
+		log.Errorf("error reconciling seed: *** hypershift error: %v", err)
+		return reconcile.Result{RequeueAfter: 15 * time.Second}, nil
+	}
+
+	if err := r.reconcile(ctx, gClient, seed, log); err != nil {
 		log.Errorf("error reconciling seed: %v", err)
 		return reconcile.Result{RequeueAfter: 15 * time.Second}, nil
 	}
 
 	return reconcile.Result{RequeueAfter: r.config.Controllers.Seed.SyncPeriod.Duration}, nil
+}
+
+type Options struct {
+	Namespace                  string
+	HyperShiftImage            string
+	HyperShiftOperatorReplicas int32
+	Development                bool
+	Render                     bool
+	ExcludeEtcdManifests       bool
+}
+
+func hyperShiftOperatorManifests(opts Options) []crclient.Object {
+	controlPlanePriorityClass := hypershiftassets.HyperShiftControlPlanePriorityClass{}.Build()
+	etcdPriorityClass := hypershiftassets.HyperShiftEtcdPriorityClass{}.Build()
+	apiCriticalPriorityClass := hypershiftassets.HyperShiftAPICriticalPriorityClass{}.Build()
+	operatorNamespace := hypershiftassets.HyperShiftNamespace{
+		Name: opts.Namespace,
+	}.Build()
+	operatorServiceAccount := hypershiftassets.HyperShiftOperatorServiceAccount{
+		Namespace: operatorNamespace,
+	}.Build()
+	operatorClusterRole := hypershiftassets.HyperShiftOperatorClusterRole{}.Build()
+	operatorClusterRoleBinding := hypershiftassets.HyperShiftOperatorClusterRoleBinding{
+		ClusterRole:    operatorClusterRole,
+		ServiceAccount: operatorServiceAccount,
+	}.Build()
+	operatorRole := hypershiftassets.HyperShiftOperatorRole{
+		Namespace: operatorNamespace,
+	}.Build()
+	operatorRoleBinding := hypershiftassets.HyperShiftOperatorRoleBinding{
+		ServiceAccount: operatorServiceAccount,
+		Role:           operatorRole,
+	}.Build()
+	operatorDeployment := hypershiftassets.HyperShiftOperatorDeployment{
+		Namespace:      operatorNamespace,
+		OperatorImage:  opts.HyperShiftImage,
+		ServiceAccount: operatorServiceAccount,
+		Replicas:       opts.HyperShiftOperatorReplicas,
+	}.Build()
+	operatorService := hypershiftassets.HyperShiftOperatorService{
+		Namespace: operatorNamespace,
+	}.Build()
+	prometheusRole := hypershiftassets.HyperShiftPrometheusRole{
+		Namespace: operatorNamespace,
+	}.Build()
+	prometheusRoleBinding := hypershiftassets.HyperShiftOperatorPrometheusRoleBinding{
+		Namespace: operatorNamespace,
+		Role:      prometheusRole,
+	}.Build()
+	// serviceMonitor := hypershiftassets.HyperShiftServiceMonitor{
+	// 	Namespace: operatorNamespace,
+	// }.Build()
+
+	var objects []crclient.Object
+
+	objects = append(objects, hypershiftassets.CustomResourceDefinitions(func(path string) bool {
+		if strings.Contains(path, "etcd") && opts.ExcludeEtcdManifests {
+			return false
+		}
+		return true
+	})...)
+
+	objects = append(objects, controlPlanePriorityClass)
+	objects = append(objects, apiCriticalPriorityClass)
+	objects = append(objects, etcdPriorityClass)
+	objects = append(objects, operatorNamespace)
+	objects = append(objects, operatorServiceAccount)
+	objects = append(objects, operatorClusterRole)
+	objects = append(objects, operatorClusterRoleBinding)
+	objects = append(objects, operatorRole)
+	objects = append(objects, operatorRoleBinding)
+	objects = append(objects, operatorDeployment)
+	objects = append(objects, operatorService)
+	objects = append(objects, prometheusRole)
+	objects = append(objects, prometheusRoleBinding)
+	// objects = append(objects, serviceMonitor)
+
+	return objects
+}
+
+func apply(ctx context.Context, gardenClient client.Client, objects []crclient.Object) error {
+	for _, object := range objects {
+		var objectBytes bytes.Buffer
+		err := hyperapi.YamlSerializer.Encode(object, &objectBytes)
+		if err != nil {
+			return err
+		}
+		err = gardenClient.Patch(ctx, object, crclient.RawPatch(types.ApplyPatchType, objectBytes.Bytes()), crclient.ForceOwnership, crclient.FieldOwner("hypershift"))
+		if err != nil {
+			return err
+		}
+		fmt.Printf("applied %s %s/%s\n", object.GetObjectKind().GroupVersionKind().Kind, object.GetNamespace(), object.GetName())
+	}
+	return nil
 }
 
 func (r *reconciler) reconcile(ctx context.Context, gardenClient client.Client, seed *gardencorev1beta1.Seed, log logrus.FieldLogger) error {
