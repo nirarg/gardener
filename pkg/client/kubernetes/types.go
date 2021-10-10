@@ -21,6 +21,7 @@ import (
 	dnsv1alpha1 "github.com/gardener/external-dns-management/pkg/apis/dns/v1alpha1"
 	resourcesv1alpha1 "github.com/gardener/gardener-resource-manager/api/resources/v1alpha1"
 	hvpav1alpha1 "github.com/gardener/hvpa-controller/api/v1alpha1"
+	configv1 "github.com/openshift/api/config/v1"
 	istionetworkingv1alpha3 "istio.io/client-go/pkg/apis/networking/v1alpha3"
 	istionetworkingv1beta1 "istio.io/client-go/pkg/apis/networking/v1beta1"
 	apiextensionv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
@@ -47,6 +48,7 @@ import (
 	gardenseedmanagementinstall "github.com/gardener/gardener/pkg/apis/seedmanagement/install"
 	gardensettingsinstall "github.com/gardener/gardener/pkg/apis/settings/install"
 	"github.com/gardener/gardener/pkg/chartrenderer"
+	hyperv1 "github.com/openshift/hypershift/api/v1alpha1"
 )
 
 var (
@@ -99,6 +101,8 @@ func init() {
 		gardenoperationsinstall.AddToScheme,
 		apiregistrationscheme.AddToScheme,
 		apiextensionv1.AddToScheme,
+		configv1.AddToScheme,
+		hyperv1.AddToScheme,
 	)
 	utilruntime.Must(gardenSchemeBuilder.AddToScheme(GardenScheme))
 
@@ -113,6 +117,8 @@ func init() {
 		apiextensionsscheme.AddToScheme,
 		istionetworkingv1beta1.AddToScheme,
 		istionetworkingv1alpha3.AddToScheme,
+		configv1.AddToScheme,
+		hyperv1.AddToScheme,
 	)
 	utilruntime.Must(seedSchemeBuilder.AddToScheme(SeedScheme))
 
@@ -127,6 +133,7 @@ func init() {
 
 	plantSchemeBuilder := runtime.NewSchemeBuilder(
 		kubernetesscheme.AddToScheme,
+		configv1.AddToScheme,
 	)
 	utilruntime.Must(plantSchemeBuilder.AddToScheme(PlantScheme))
 }

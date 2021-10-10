@@ -16,8 +16,12 @@ package shoot
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io/ioutil"
+	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -40,16 +44,23 @@ import (
 	gutil "github.com/gardener/gardener/pkg/utils/gardener"
 	kutil "github.com/gardener/gardener/pkg/utils/kubernetes"
 	"github.com/gardener/gardener/pkg/utils/kubernetes/health"
+	"github.com/openshift/hypershift/api/v1alpha1"
 
+	hyperapi "github.com/openshift/hypershift/api"
+	apifixtures "github.com/openshift/hypershift/api/fixtures"
+	awsinfra "github.com/openshift/hypershift/cmd/infra/aws"
+	"github.com/openshift/hypershift/cmd/util"
 	"github.com/sirupsen/logrus"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	utilrand "k8s.io/apimachinery/pkg/util/rand"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/component-base/version"
 	"k8s.io/utils/pointer"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	crclient "sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
@@ -184,7 +195,7 @@ func (c *Controller) reconcileShootRequest(ctx context.Context, request reconcil
 	}
 
 	// fetch related objects required for shoot operation
-	project, _, err := gutil.ProjectAndNamespaceFromReader(ctx, gardenClient.Client(), shoot.Namespace)
+	// project, _, err := gutil.ProjectAndNamespaceFromReader(ctx, gardenClient.Client(), shoot.Namespace)
 	if err != nil {
 		return reconcile.Result{}, err
 	}
@@ -199,45 +210,245 @@ func (c *Controller) reconcileShootRequest(ctx context.Context, request reconcil
 		return reconcile.Result{}, err
 	}
 
-	key := shootKey(shoot)
-	if shoot.DeletionTimestamp != nil {
-		log = log.WithField("operation", "delete")
-		c.shootReconciliationDueTracker.off(key)
-		return c.deleteShoot(ctx, log, gardenClient, shoot, project, cloudProfile, seed)
-	}
+	// key := shootKey(shoot)
+	// if shoot.DeletionTimestamp != nil {
+	// 	log = log.WithField("operation", "delete")
+	// 	c.shootReconciliationDueTracker.off(key)
+	// 	return c.deleteShoot(ctx, log, gardenClient, shoot, project, cloudProfile, seed)
+	// }
 
-	if shouldPrepareShootForMigration(shoot) {
-		log = log.WithField("operation", "migrate")
-		c.shootReconciliationDueTracker.off(key)
+	// if shouldPrepareShootForMigration(shoot) {
+	// 	log = log.WithField("operation", "migrate")
+	// 	c.shootReconciliationDueTracker.off(key)
 
-		if err := c.isSeedReadyForMigration(seed); err != nil {
-			return reconcile.Result{}, fmt.Errorf("target Seed is not available to host the Control Plane of Shoot %s: %w", shoot.GetName(), err)
-		}
+	// 	if err := c.isSeedReadyForMigration(seed); err != nil {
+	// 		return reconcile.Result{}, fmt.Errorf("target Seed is not available to host the Control Plane of Shoot %s: %w", shoot.GetName(), err)
+	// 	}
 
-		hasBastions, err := c.shootHasBastions(ctx, shoot, gardenClient)
-		if err != nil {
-			return reconcile.Result{}, fmt.Errorf("failed to check for related Bastions: %w", err)
-		}
-		if hasBastions {
-			return reconcile.Result{}, errors.New("Shoot has still Bastions")
-		}
+	// 	hasBastions, err := c.shootHasBastions(ctx, shoot, gardenClient)
+	// 	if err != nil {
+	// 		return reconcile.Result{}, fmt.Errorf("failed to check for related Bastions: %w", err)
+	// 	}
+	// 	if hasBastions {
+	// 		return reconcile.Result{}, errors.New("Shoot has still Bastions")
+	// 	}
 
-		sourceSeed := &gardencorev1beta1.Seed{}
-		if err := gardenClient.Client().Get(ctx, client.ObjectKey{Name: *shoot.Status.SeedName}, sourceSeed); err != nil {
-			return reconcile.Result{}, err
-		}
+	// 	sourceSeed := &gardencorev1beta1.Seed{}
+	// 	if err := gardenClient.Client().Get(ctx, client.ObjectKey{Name: *shoot.Status.SeedName}, sourceSeed); err != nil {
+	// 		return reconcile.Result{}, err
+	// 	}
 
-		return c.prepareShootForMigration(ctx, log, gardenClient, shoot, project, cloudProfile, sourceSeed)
-	}
+	// 	return c.prepareShootForMigration(ctx, log, gardenClient, shoot, project, cloudProfile, sourceSeed)
+	// }
 
-	// if shoot is no longer managed by this gardenlet (e.g., due to migration to another seed) then don't requeue
-	if !controllerutils.ShootIsManagedByThisGardenlet(shoot, c.config) {
-		log.Debugf("Skipping because Shoot is not managed by this gardenlet in seed %s", *shoot.Spec.SeedName)
+	// // if shoot is no longer managed by this gardenlet (e.g., due to migration to another seed) then don't requeue
+	// if !controllerutils.ShootIsManagedByThisGardenlet(shoot, c.config) {
+	// 	log.Debugf("Skipping because Shoot is not managed by this gardenlet in seed %s", *shoot.Spec.SeedName)
+	// 	return reconcile.Result{}, nil
+	// }
+
+	// log = log.WithField("operation", "reconcile")
+	// return c.reconcileShoot(ctx, log, gardenClient, shoot, project, cloudProfile, seed)
+	log.Info("************** Start hypershift")
+	if err := c.createHypershiftCluster(ctx, seed, log); err != nil {
+		log.Errorf("failed to create hypershift cluster: %+v", err)
 		return reconcile.Result{}, nil
 	}
+	log.Info("************** End hypershift")
+	return reconcile.Result{}, nil
+}
 
-	log = log.WithField("operation", "reconcile")
-	return c.reconcileShoot(ctx, log, gardenClient, shoot, project, cloudProfile, seed)
+type Options struct {
+	Namespace          string
+	Name               string
+	ReleaseImage       string
+	PullSecretFile     string
+	AWSCredentialsFile string
+	SSHKeyFile         string
+	NodePoolReplicas   int32
+	Render             bool
+	InfraID            string
+	InfrastructureJSON string
+	IAMJSON            string
+	InstanceType       string
+	Region             string
+	BaseDomain         string
+	IssuerURL          string
+	PublicZoneID       string
+	PrivateZoneID      string
+	Annotations        []string
+	NetworkType        string
+	FIPS               bool
+}
+
+func (c *Controller) createHypershiftCluster(ctx context.Context, seed *gardencorev1beta1.Seed, log *logrus.Entry) error {
+	releaseImage := "quay.io/openshift-release-dev/ocp-release:4.8.6-x86_64"
+	opts := Options{
+		Namespace:          "clusters",
+		Name:               "nargaman-example",
+		ReleaseImage:       releaseImage,
+		PullSecretFile:     "./pull-secret/pull-secret.txt",
+		AWSCredentialsFile: "./aws/credentials",
+		SSHKeyFile:         "./ssh/id_rsa.pub",
+		NodePoolReplicas:   -1,
+		Render:             false,
+		InfrastructureJSON: "",
+		Region:             "us-east-1",
+		InfraID:            "",
+		InstanceType:       "m4.large",
+		Annotations:        []string{},
+		NetworkType:        string(v1alpha1.OpenShiftSDN),
+		FIPS:               false,
+		BaseDomain:         "kni.syseng.devcluster.openshift.com",
+	}
+
+	if len(opts.ReleaseImage) == 0 {
+		return fmt.Errorf("release image is required")
+	}
+
+	annotations := map[string]string{}
+	for _, s := range opts.Annotations {
+		pair := strings.SplitN(s, "=", 2)
+		if len(pair) != 2 {
+			return fmt.Errorf("invalid annotation: %s", s)
+		}
+		k, v := pair[0], pair[1]
+		annotations[k] = v
+	}
+
+	pullSecret, err := ioutil.ReadFile(opts.PullSecretFile)
+	if err != nil {
+		return fmt.Errorf("failed to read pull secret file: %w", err)
+	}
+	var sshKey []byte
+	if len(opts.SSHKeyFile) > 0 {
+		key, err := ioutil.ReadFile(opts.SSHKeyFile)
+		if err != nil {
+			return fmt.Errorf("failed to read ssh key file: %w", err)
+		}
+		sshKey = key
+	}
+
+	seedClientSet, err := c.clientMap.GetClient(ctx, keys.ForSeed(seed))
+	if err != nil {
+		return fmt.Errorf("hypershift apply --> failed to get seed client: %w", err)
+	}
+
+	seedClient := seedClientSet.Client()
+
+	// Load or create infrastructure for the cluster
+	var infra *awsinfra.CreateInfraOutput
+	if len(opts.InfrastructureJSON) > 0 {
+		rawInfra, err := ioutil.ReadFile(opts.InfrastructureJSON)
+		if err != nil {
+			return fmt.Errorf("failed to read infra json file: %w", err)
+		}
+		infra = &awsinfra.CreateInfraOutput{}
+		if err = json.Unmarshal(rawInfra, infra); err != nil {
+			return fmt.Errorf("failed to load infra json: %w", err)
+		}
+	}
+	if opts.BaseDomain == "" {
+		if infra != nil {
+			opts.BaseDomain = infra.BaseDomain
+		} else {
+			return fmt.Errorf("base-domain flag is required if infra-json is not provided")
+		}
+	}
+	if infra == nil {
+		infraID := opts.InfraID
+		if len(infraID) == 0 {
+			infraID = fmt.Sprintf("%s-%s", opts.Name, utilrand.String(5))
+		}
+		opt := awsinfra.CreateInfraOptions{
+			Region:             opts.Region,
+			InfraID:            infraID,
+			AWSCredentialsFile: opts.AWSCredentialsFile,
+			Name:               opts.Name,
+			BaseDomain:         opts.BaseDomain,
+		}
+		infra, err = opt.CreateInfra(ctx)
+		if err != nil {
+			return fmt.Errorf("failed to create infra: %w", err)
+		}
+	}
+
+	var iamInfo *awsinfra.CreateIAMOutput
+	if len(opts.IAMJSON) > 0 {
+		rawIAM, err := ioutil.ReadFile(opts.IAMJSON)
+		if err != nil {
+			return fmt.Errorf("failed to read iam json file: %w", err)
+		}
+		iamInfo = &awsinfra.CreateIAMOutput{}
+		if err = json.Unmarshal(rawIAM, iamInfo); err != nil {
+			return fmt.Errorf("failed to load infra json: %w", err)
+		}
+	} else {
+		opt := awsinfra.CreateIAMOptions{
+			Region:             opts.Region,
+			AWSCredentialsFile: opts.AWSCredentialsFile,
+			InfraID:            infra.InfraID,
+			IssuerURL:          opts.IssuerURL,
+		}
+		iamInfo, err = opt.CreateIAM(ctx, seedClient)
+		if err != nil {
+			return fmt.Errorf("failed to create iam: %w", err)
+		}
+	}
+
+	exampleObjects := apifixtures.ExampleOptions{
+		Namespace:        opts.Namespace,
+		Name:             infra.Name,
+		Annotations:      annotations,
+		ReleaseImage:     opts.ReleaseImage,
+		PullSecret:       pullSecret,
+		IssuerURL:        iamInfo.IssuerURL,
+		SSHKey:           sshKey,
+		NodePoolReplicas: opts.NodePoolReplicas,
+		InfraID:          infra.InfraID,
+		ComputeCIDR:      infra.ComputeCIDR,
+		BaseDomain:       infra.BaseDomain,
+		PublicZoneID:     infra.PublicZoneID,
+		PrivateZoneID:    infra.PrivateZoneID,
+		NetworkType:      v1alpha1.NetworkType(opts.NetworkType),
+		FIPS:             opts.FIPS,
+		AWS: apifixtures.ExampleAWSOptions{
+			Region:                                 infra.Region,
+			Zone:                                   infra.Zone,
+			VPCID:                                  infra.VPCID,
+			SubnetID:                               infra.PrivateSubnetID,
+			SecurityGroupID:                        infra.SecurityGroupID,
+			InstanceProfile:                        iamInfo.ProfileName,
+			InstanceType:                           opts.InstanceType,
+			Roles:                                  iamInfo.Roles,
+			KubeCloudControllerUserAccessKeyID:     iamInfo.KubeCloudControllerUserAccessKeyID,
+			KubeCloudControllerUserAccessKeySecret: iamInfo.KubeCloudControllerUserAccessKeySecret,
+			NodePoolManagementUserAccessKeyID:      iamInfo.NodePoolManagementUserAccessKeyID,
+			NodePoolManagementUserAccessKeySecret:  iamInfo.NodePoolManagementUserAccessKeySecret,
+		},
+	}.Resources().AsObjects()
+
+	switch {
+	case opts.Render:
+		for _, object := range exampleObjects {
+			err := hyperapi.YamlSerializer.Encode(object, os.Stdout)
+			if err != nil {
+				return fmt.Errorf("failed to encode objects: %w", err)
+			}
+			fmt.Println("---")
+		}
+	default:
+		for _, object := range exampleObjects {
+			key := crclient.ObjectKeyFromObject(object)
+			object.SetLabels(map[string]string{util.AutoInfraLabelName: infra.InfraID})
+			if err := seedClient.Patch(ctx, object, crclient.Apply, crclient.ForceOwnership, crclient.FieldOwner("hypershift-cli")); err != nil {
+				return fmt.Errorf("failed to apply object %q: %w", key, err)
+			}
+			log.Info("Applied Kube resource", "kind", object.GetObjectKind().GroupVersionKind().Kind, "namespace", key.Namespace, "name", key.Name)
+		}
+	}
+
+	return nil
 }
 
 func shouldPrepareShootForMigration(shoot *gardencorev1beta1.Shoot) bool {

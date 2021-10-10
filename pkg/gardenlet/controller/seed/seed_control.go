@@ -141,12 +141,13 @@ func (r *reconciler) Reconcile(ctx context.Context, request reconcile.Request) (
 	}
 
 	opts := Options{
-		Namespace:       "hypershift",
-		HyperShiftImage: "registry.ci.openshift.org/hypershift/hypershift:latest",
+		Namespace:                  "hypershift",
+		HyperShiftImage:            "registry.ci.openshift.org/hypershift/hypershift:latest",
+		HyperShiftOperatorReplicas: 1,
 	}
 	var objects []crclient.Object
 	objects = append(objects, hyperShiftOperatorManifests(opts)...)
-	if err := apply(ctx, gClient, objects); err != nil {
+	if err := r.apply(ctx, seed, objects); err != nil {
 		log.Errorf("error reconciling seed: *** hypershift error: %v", err)
 		return reconcile.Result{RequeueAfter: 15 * time.Second}, nil
 	}
@@ -206,9 +207,9 @@ func hyperShiftOperatorManifests(opts Options) []crclient.Object {
 		Namespace: operatorNamespace,
 		Role:      prometheusRole,
 	}.Build()
-	// serviceMonitor := hypershiftassets.HyperShiftServiceMonitor{
-	// 	Namespace: operatorNamespace,
-	// }.Build()
+	serviceMonitor := hypershiftassets.HyperShiftServiceMonitor{
+		Namespace: operatorNamespace,
+	}.Build()
 
 	var objects []crclient.Object
 
@@ -232,19 +233,25 @@ func hyperShiftOperatorManifests(opts Options) []crclient.Object {
 	objects = append(objects, operatorService)
 	objects = append(objects, prometheusRole)
 	objects = append(objects, prometheusRoleBinding)
-	// objects = append(objects, serviceMonitor)
+	objects = append(objects, serviceMonitor)
 
 	return objects
 }
 
-func apply(ctx context.Context, gardenClient client.Client, objects []crclient.Object) error {
+func (r *reconciler) apply(ctx context.Context, seed *gardencorev1beta1.Seed, objects []crclient.Object) error {
 	for _, object := range objects {
 		var objectBytes bytes.Buffer
 		err := hyperapi.YamlSerializer.Encode(object, &objectBytes)
 		if err != nil {
 			return err
 		}
-		err = gardenClient.Patch(ctx, object, crclient.RawPatch(types.ApplyPatchType, objectBytes.Bytes()), crclient.ForceOwnership, crclient.FieldOwner("hypershift"))
+		seedClientSet, err := r.clientMap.GetClient(ctx, keys.ForSeed(seed))
+		if err != nil {
+			return fmt.Errorf("hypershift apply --> failed to get seed client: %w", err)
+		}
+
+		seedClient := seedClientSet.Client()
+		err = seedClient.Patch(ctx, object, crclient.RawPatch(types.ApplyPatchType, objectBytes.Bytes()), crclient.ForceOwnership, crclient.FieldOwner("hypershift"))
 		if err != nil {
 			return err
 		}

@@ -377,4 +377,12 @@ rules:
   - envoyfilters
   verbs:
   - delete
+- apiGroups:
+  - config.openshift.io
+  resources:
+  - ingresses
+  verbs:
+  - get
+  - list
+  - watch
 {{- end }}
