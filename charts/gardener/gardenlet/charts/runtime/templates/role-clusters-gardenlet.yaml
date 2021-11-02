@@ -16,6 +16,7 @@ rules:
   - hypershift.openshift.io
   resources:
   - hostedclusters
+  - nodepools
   verbs:
   - create
   - patch

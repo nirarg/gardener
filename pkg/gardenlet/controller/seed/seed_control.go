@@ -142,7 +142,7 @@ func (r *reconciler) Reconcile(ctx context.Context, request reconcile.Request) (
 
 	opts := Options{
 		Namespace:                  "hypershift",
-		HyperShiftImage:            "registry.ci.openshift.org/hypershift/hypershift:latest",
+		HyperShiftImage:            "quay.io/nargaman/hypershift:latest",
 		HyperShiftOperatorReplicas: 1,
 	}
 	var objects []crclient.Object
@@ -157,7 +157,7 @@ func (r *reconciler) Reconcile(ctx context.Context, request reconcile.Request) (
 		return reconcile.Result{RequeueAfter: 15 * time.Second}, nil
 	}
 
-	return reconcile.Result{RequeueAfter: r.config.Controllers.Seed.SyncPeriod.Duration}, nil
+	return reconcile.Result{}, nil
 }
 
 type Options struct {

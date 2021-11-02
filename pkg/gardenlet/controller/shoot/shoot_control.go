@@ -290,7 +290,7 @@ func (c *Controller) createHypershiftCluster(ctx context.Context, seed *gardenco
 		PullSecretFile:     "./pull-secret/pull-secret.txt",
 		AWSCredentialsFile: "./aws/credentials",
 		SSHKeyFile:         "./ssh/id_rsa.pub",
-		NodePoolReplicas:   -1,
+		NodePoolReplicas:   2,
 		Render:             false,
 		InfrastructureJSON: "",
 		Region:             "us-east-1",

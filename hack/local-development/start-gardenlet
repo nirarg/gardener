@@ -115,12 +115,15 @@ rm -f "$tmpConfig"
 kubectl   --kubeconfig="$SEED_KUBECONFIG" get    namespace garden &>/dev/null || \
   kubectl --kubeconfig="$SEED_KUBECONFIG" create namespace garden
 
+echo "*************************************** 1"
 # apply RBAC resources in seed cluster
 helm template gardenlet "$GARDENLET_CHARTS_RUNTIME_DIR" -f "$gardenletChartValues" |
   $YQ eval 'select(.apiVersion=="rbac.authorization.k8s.io/v1")' - |
   kubectl --kubeconfig="$SEED_KUBECONFIG" auth reconcile --remove-extra-permissions --remove-extra-subjects -f -
+echo "*************************************** 2"
 helm template gardenlet "$GARDENLET_CHARTS_RUNTIME_DIR" -s templates/serviceaccount.yaml -f "$gardenletChartValues" |
   kubectl --kubeconfig="$SEED_KUBECONFIG" apply -f -
+echo "*************************************** 3"
 rm -f "$gardenletChartValues"
 
 # keep original seed kubeconfig as is
